@@ -1,0 +1,6 @@
+# requirements.txt for your tkinter-based VPN app
+# All current modules are from the Python standard library.
+# No external dependencies are required.
+
+# If you plan to rebuild the binary using PyInstaller:
+pyinstaller>=6.0

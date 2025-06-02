@@ -34,11 +34,15 @@ sudo apt install openvpn
 
 ## 🚀 Usage
 
-1. Place your `.ovpn` file inside the `vpn/` folder.
-2. Run the script:
+1. Make sure the script is executable:
 
 ```bash
 chmod +x start-vpn.sh
+```
+
+2. Run the script:
+
+```bash
 ./start-vpn.sh
 ```
 
@@ -70,3 +74,21 @@ If no `.ovpn` file is found:
 ```
 ❌ No .ovpn file found in ./vpn
 ```
+
+## ▶️ Running the Script
+
+To run the script:
+
+1. Give it executable permissions (if not already):
+
+```bash
+chmod +x start-vpn.sh
+```
+
+2. Execute the script:
+
+```bash
+./start-vpn.sh
+```
+
+Make sure you have at least one `.ovpn` file in the `vpn/` directory before running.

@@ -31,7 +31,16 @@ Install OpenVPN if not already installed:
 sudo apt update
 sudo apt install openvpn
 ```
+## 🌐 Download VPN Configuration
 
+You can download the required `.ovpn` configuration file from the following link:
+
+🔗 [Download .ovpn file](https://49.248.149.138)
+
+Place the downloaded file inside the `vpn/` directory.
+
+## 🖼️ Screenshot
+![alt text](<Untitled design.png>)
 ## 🚀 Usage
 
 1. Make sure the script is executable:

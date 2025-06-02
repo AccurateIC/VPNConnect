@@ -1,68 +1,72 @@
-# VPNConnect
 
+# VPN Starter Script
 
+This Bash script automates the process of connecting to a VPN using the first `.ovpn` configuration file found in a specified directory.
 
-## Project Structure
-```├── README.md
-├── requirements.txt
-├── start_vpn.sh
-├── vpn
-│ └── cred.txt
-└── VPNConnect.py
-```
+## 📜 Description
 
+- Checks if **OpenVPN** is installed.
+- Searches for the first `.ovpn` file in the `./vpn` directory.
+- Starts the VPN connection using `sudo openvpn`.
 
+## 📁 Directory Structure
 
-
-
-- `VPNConnect.py` — Main Python application.
-- `requirements.txt` — Python dependencies.
-- `start_vpn.sh` — Optional shell script to start VPN.
-- `vpn/cred.txt` — VPN credentials file.
-
----
-
-## Prerequisites
-
-- Python 3.10 or higher
-- `pip` package manager
-- `pyinstaller` for packaging the app
-
----
-
-## Setup
-
-### Install dependencies
-
-``` pip install -r requirements.txt ```
-
-Note: Currently only pyinstaller is required since other modules are from the standard library.
-
-### Building the Executable
-Run the following command to create a standalone Linux binary:
-
-
-``` pyinstaller --onefile --noconsole --add-binary /usr/lib/x86_64-linux-gnu/libpython3.10.so.1.0:. VPNConnect.py ```
-
-***The output binary will be located at dist/VPNConnect.***
-
-### Running the App
-Execute the binary:
-
-```./dist/VPNConnect```
-
-
-### Troubleshooting
-If you encounter missing libraries, install them via:
-
-
-```sudo apt install libpython3.10 python3-tk```
-
-Consider building inside a Python virtual environment if issues persist:
+Your project should have the following structure:
 
 ```
-python3 -m venv venv
-source venv/bin/activate
-pip install pyinstaller
-pyinstaller --onefile --noconsole --add-binary /usr/lib/x86_64-linux-gnu/libpython3.10.so.1.0:. VPNConnect.py
+.
+├── start-vpn.sh        # This script
+└── vpn/
+    └── your-config.ovpn
+```
+
+## 🛠️ Prerequisites
+
+- Linux-based system
+- `openvpn` installed
+
+Install OpenVPN if not already installed:
+
+```bash
+sudo apt update
+sudo apt install openvpn
+```
+
+## 🚀 Usage
+
+1. Place your `.ovpn` file inside the `vpn/` folder.
+2. Run the script:
+
+```bash
+chmod +x start-vpn.sh
+./start-vpn.sh
+```
+
+The script will:
+- Notify you if OpenVPN is missing.
+- Look for `.ovpn` files in the `vpn` directory.
+- Start the VPN using the first `.ovpn` file found.
+
+## ⚠️ Notes
+
+- You may be prompted for `sudo` password to start the VPN.
+- If no `.ovpn` file is found, the script exits with an error message.
+- Only the **first** `.ovpn` file found will be used.
+
+## ✅ Example Output
+
+```
+🔐 Starting VPN using config: ./vpn/myvpn.ovpn
+```
+
+If OpenVPN is not installed:
+
+```
+❌ OpenVPN is not installed. Run 'sudo apt install openvpn'
+```
+
+If no `.ovpn` file is found:
+
+```
+❌ No .ovpn file found in ./vpn
 ```

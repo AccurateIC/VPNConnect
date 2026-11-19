@@ -28,6 +28,9 @@
 - Audit: SHIP-WITH-FIXES. All findings are fixed with tests: a wrong OTP no longer deletes the saved password; the poll uses has_saved (no secret load, no unlock prompts); the journal is scoped to the current attempt; a failed tray connect opens the window with the reason; the IT off switch is enforceable; Quit during a one-click connect disconnects; another user's item is cleaned up.
 - 89 tests; the live keyring round trip passes with VPNCONNECT_KEYRING_TEST=1 (not part of the gate, because it touches the user keyring).
 
+## 2026-11-19 - sophos-ovpn-import (quick)
+- Sophos Firewall .ovpn files have `route remote_host 255.255.255.255 net_gateway`, which NM's importer rejects ("unsupported 1th argument remote_host to route"). The app showed "not a VPN file we can use". `nm.compatible_copy` now drops that line (NM adds the server route itself) via a private 0600 temp copy under XDG_RUNTIME_DIR, deleted right after import. Verified parse-only against the owner's real file.
+
 ## Next
 - `/company` is open. Candidate work, cheapest first: add tests for import_profile and `_ensure_profile` (WORRIES #2), and add a CI workflow that runs the two gates.
 

@@ -12,8 +12,11 @@ password-flags=2 ("always ask") and the secret is piped to nmcli on stdin.
 from __future__ import annotations
 
 import getpass
+import os
+import re
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +70,33 @@ def check_requirements() -> list[str]:
     return problems
 
 
+# Lines some VPN gateways write into .ovpn files that NetworkManager's importer rejects,
+# although NetworkManager already does what they ask:
+#   Sophos Firewall: "route remote_host 255.255.255.255 net_gateway" (reach the VPN server
+#   itself via the normal gateway). NetworkManager adds that route on its own.
+_UNSUPPORTED_LINES = [re.compile(r"^\s*route\s+remote_host\b")]
+
+
+def compatible_copy(ovpn: Path) -> Path | None:
+    """A private copy of `ovpn` without lines NetworkManager can't import, or None if none.
+
+    The copy holds the user's key material, so it goes in a fresh 0700 directory under
+    XDG_RUNTIME_DIR (tmpfs, per user) as a 0600 file, and the caller deletes it right after
+    import. It keeps the original file name, so the certificates NetworkManager extracts get
+    the same names as from the original.
+    """
+    lines = ovpn.read_text(errors="replace").splitlines(keepends=True)
+    kept = [line for line in lines if not any(p.match(line) for p in _UNSUPPORTED_LINES)]
+    if len(kept) == len(lines):
+        return None
+    folder = Path(tempfile.mkdtemp(prefix="vpnconnect-", dir=os.environ.get("XDG_RUNTIME_DIR") or None))
+    copy = folder / ovpn.name
+    fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.writelines(kept)
+    return copy
+
+
 def import_profile(ovpn: str | Path, name: str, username: str = "") -> None:
     """Import an .ovpn file as a connection owned by (and visible only to) the current user.
 
@@ -89,10 +119,15 @@ def import_profile(ovpn: str | Path, name: str, username: str = "") -> None:
     info = NM.VpnPluginInfo.new_search_file(None, OPENVPN_SERVICE)
     if info is None:
         raise VPNError("NetworkManager OpenVPN plugin not found (network-manager-openvpn-gnome).")
+    copy = compatible_copy(ovpn)
     try:
-        con = info.load_editor_plugin().import_(str(ovpn))
+        con = info.load_editor_plugin().import_(str(copy or ovpn))
     except GLib.Error as exc:
         raise VPNError(f"Could not read {ovpn.name}: {exc.message}") from exc
+    finally:
+        if copy is not None:
+            copy.unlink(missing_ok=True)
+            copy.parent.rmdir()
 
     s_con = con.get_setting_connection()
     s_con.set_property(NM.SETTING_CONNECTION_ID, name)

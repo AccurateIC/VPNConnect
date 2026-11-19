@@ -47,6 +47,36 @@ class ConnectTests(unittest.TestCase):
             nm.connect("X", "a\nb")
 
 
+class OvpnCompatTests(unittest.TestCase):
+    """Sophos Firewall .ovpn files carry a route line NetworkManager's importer rejects."""
+
+    SOPHOS = ("client\ndev tun\nproto udp\nroute remote_host 255.255.255.255 net_gateway\n"
+              "nobind\n<key>\nSECRET\n</key>\nremote vpn.invalid 8443 udp\n")
+
+    def test_drops_only_the_unsupported_line_privately(self):
+        import os, stat, tempfile, pathlib
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
+            src = pathlib.Path(d, "me.ovpn")
+            src.write_text(self.SOPHOS)
+            copy = nm.compatible_copy(src)
+            self.assertEqual(copy.name, "me.ovpn")
+            self.assertEqual(stat.S_IMODE(copy.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(copy.parent.stat().st_mode), 0o700)
+            text = copy.read_text()
+            self.assertNotIn("remote_host", text)
+            self.assertEqual(text, self.SOPHOS.replace("route remote_host 255.255.255.255 net_gateway\n", ""))
+            self.assertEqual(src.read_text(), self.SOPHOS)  # original untouched
+            copy.unlink(); copy.parent.rmdir()
+
+    def test_untouched_files_need_no_copy(self):
+        import tempfile, pathlib
+        with tempfile.TemporaryDirectory() as d:
+            src = pathlib.Path(d, "plain.ovpn")
+            src.write_text("client\nroute 10.0.0.0 255.0.0.0\nremote vpn.invalid 1194\n")
+            self.assertIsNone(nm.compatible_copy(src))
+
+
 class SettingsTests(unittest.TestCase):
     def test_user_overrides_system(self):
         import tempfile, pathlib

@@ -62,6 +62,17 @@ class SettingsTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self):
+        # Hermetic: never read the developer's real /etc or ~/.config settings.
+        empty = settings.SYSTEM_DIR / "__vpnconnect_test_does_not_exist__.conf"
+        for name in ("SYSTEM_CONFIG", "USER_CONFIG"):
+            patcher = mock.patch.object(settings, name, empty)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch("sys.stdout")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_status_exit_codes(self):
         with mock.patch.object(nm, "check_requirements", return_value=[]), \
              mock.patch.object(nm, "status", return_value=nm.Status(True, "connected", "alice")):
@@ -71,7 +82,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(["status"]), 3)
 
     def test_missing_requirements(self):
-        with mock.patch.object(nm, "check_requirements", return_value=["no plugin"]):
+        with mock.patch.object(nm, "check_requirements", return_value=["no plugin"]), \
+             mock.patch("sys.stderr"):
             self.assertEqual(cli.main(["status"]), 2)
 
 

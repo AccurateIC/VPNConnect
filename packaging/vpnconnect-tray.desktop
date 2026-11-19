@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=VPNConnect icon
+Comment=Company VPN icon in the top bar
+Exec=vpnconnect tray
+Icon=network-vpn
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3

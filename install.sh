@@ -30,10 +30,11 @@ if command -v apt-get >/dev/null; then
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         network-manager network-manager-openvpn network-manager-openvpn-gnome \
-        python3 python3-tk python3-gi gir1.2-nm-1.0
+        python3 python3-tk python3-gi gir1.2-nm-1.0 gir1.2-ayatanaappindicator3-0.1
 elif command -v dnf >/dev/null; then
     dnf install -y NetworkManager NetworkManager-openvpn NetworkManager-openvpn-gnome \
-        python3 python3-tkinter python3-gobject NetworkManager-libnm
+        python3 python3-tkinter python3-gobject NetworkManager-libnm \
+        libayatana-appindicator-gtk3 gnome-shell-extension-appindicator
 else
     echo "Unsupported distro: install NetworkManager-openvpn, python3-tk and python3-gi manually." >&2
 fi
@@ -53,6 +54,8 @@ EOF
 chmod 755 /usr/local/bin/vpnconnect
 
 install -Dm644 "$SRC/packaging/vpnconnect.desktop" /usr/share/applications/vpnconnect.desktop
+# Top-bar VPN icon for every user, started at login.
+install -Dm644 "$SRC/packaging/vpnconnect-tray.desktop" /etc/xdg/autostart/vpnconnect-tray.desktop
 
 install -d "$ETC"
 if [[ ! -f "$ETC/vpnconnect.conf" ]]; then
@@ -66,4 +69,5 @@ if [[ -n "$PROFILE" ]]; then
     echo "    installed shared profile $ETC/profile.ovpn"
 fi
 
-echo "==> Done. Employees can open 'VPNConnect' from the app menu or run: vpnconnect"
+echo "==> Done. Every user gets a VPN icon in the top bar at their next login."
+echo "    Right now: open 'VPNConnect' from the app menu (this also starts the icon)."

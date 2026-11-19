@@ -1,4 +1,4 @@
-"""Command line interface: `vpnconnect [gui|import|connect|disconnect|status|remove]`."""
+"""Command line interface: `vpnconnect [gui|tray|import|connect|disconnect|status|remove]`."""
 
 from __future__ import annotations
 
@@ -65,7 +65,13 @@ def cmd_remove(args, cfg):
 def cmd_gui(args, cfg):
     from .gui import run
 
-    return run(cfg)
+    return run(cfg, from_tray=getattr(args, "from_tray", False))
+
+
+def cmd_tray(args, cfg):
+    from .tray import run
+
+    return run(cfg, open_window=getattr(args, "open", False))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,7 +79,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("gui", help="open the graphical client (default)")
+    p = sub.add_parser("gui", help="open the graphical client (default)")
+    p.add_argument("--from-tray", action="store_true", help=argparse.SUPPRESS)
+    p = sub.add_parser("tray", help="run the VPN icon in the top bar")
+    p.add_argument("--open", action="store_true", help="also open the window")
     p = sub.add_parser("import", help="import your .ovpn profile")
     p.add_argument("file")
     p.add_argument("-u", "--username")
@@ -93,11 +102,19 @@ def main(argv: list[str] | None = None) -> int:
     if problems:
         print("\n".join(f"error: {p}" for p in problems), file=sys.stderr)
         print("Ask IT to run install.sh, or: sudo apt install network-manager-openvpn-gnome", file=sys.stderr)
+        if command == "gui" or (command == "tray" and getattr(args, "open", False)):
+            # FR-GUI-08: launched from the app menu there is no terminal, so show a window.
+            try:
+                from .gui import show_problems
+
+                show_problems(problems)
+            except Exception:  # no display / no tkinter: stderr above is all we can do
+                pass
         return 2
 
     cfg = settings.load()
     handler = {
-        "gui": cmd_gui, "import": cmd_import, "connect": cmd_connect,
+        "gui": cmd_gui, "tray": cmd_tray, "import": cmd_import, "connect": cmd_connect,
         "disconnect": cmd_disconnect, "status": cmd_status, "remove": cmd_remove,
     }[command]
     try:

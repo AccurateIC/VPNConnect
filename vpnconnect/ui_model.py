@@ -46,7 +46,8 @@ ERRORS = {
     ),
     "auth": Friendly(
         "Wrong username, password or code.",
-        "Check them and try again. If you use a code, wait for a new one.",
+        "Use exactly the login of the VPN portal (capital letters matter). "
+        "Too many tries can block you for a while. If you use a code, wait for a new one.",
     ),
     "plugin": Friendly(
         "This computer is missing the VPN add-on.",
@@ -54,7 +55,8 @@ ERRORS = {
     ),
     "timeout": Friendly(
         "The VPN server did not answer in time.",
-        "Check that you are online, then try again.",
+        "Check that you are online. If you just typed a wrong password a few times, the "
+        "server may block you for a while: wait 10 minutes, then try once.",
     ),
     "nm_missing": Friendly(
         "This computer's network manager was not found.",
@@ -97,7 +99,9 @@ def classify_error(message: str) -> str:
 def friendly_error(message: str, otp: bool = True) -> Friendly:
     kind = classify_error(message)
     if kind == "auth" and not otp:
-        return Friendly("Wrong username or password.", "Check them and try again.")
+        return Friendly("Wrong username or password.",
+                        "Use exactly the login of the VPN portal (capital letters matter). "
+                        "Too many tries can block you for a while.")
     return ERRORS[kind]
 
 

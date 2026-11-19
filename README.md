@@ -97,7 +97,8 @@ If IT set a time limit, you are disconnected automatically after that time.
 
 | Problem | What to do |
 |---|---|
-| "Wrong username or password" | Check them and try again. If you use a code, wait for a new one. |
+| "Wrong username or password" | Use exactly the username and password of the VPN portal, including capital letters. Not sure? Log in to the portal in your browser with them. If you use a code, wait for a new one. |
+| "The VPN server did not answer in time" | Check you are online. If you just had a few wrong passwords, the company firewall blocks you for a while: wait 10 minutes and try **once** (each retry can extend the block). |
 | "Something went wrong" | Try again. Still failing? In the window click **Show details**, then **Copy for IT**, and paste it into a message to IT. |
 | No VPN icon in the top bar | Open **VPNConnect** from the applications menu (this starts the icon). On Fedora or Debian, IT may need to turn on top-bar icons, see below. |
 | Install says `Connection reset by peer` | Your network blocks `raw.githubusercontent.com`. Use the install command at the top of this page; it only needs `github.com`. |

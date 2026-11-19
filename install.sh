@@ -30,11 +30,15 @@ if command -v apt-get >/dev/null; then
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         network-manager network-manager-openvpn network-manager-openvpn-gnome \
-        python3 python3-tk python3-gi gir1.2-nm-1.0 gir1.2-ayatanaappindicator3-0.1
+        python3 python3-tk python3-gi gir1.2-nm-1.0
+    # Top-bar icon support. Optional: without it VPNConnect still works from the menu.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gir1.2-ayatanaappindicator3-0.1 \
+        || echo "    (top-bar icon support not available on this system; skipping)"
 elif command -v dnf >/dev/null; then
     dnf install -y NetworkManager NetworkManager-openvpn NetworkManager-openvpn-gnome \
-        python3 python3-tkinter python3-gobject NetworkManager-libnm \
-        libayatana-appindicator-gtk3 gnome-shell-extension-appindicator
+        python3 python3-tkinter python3-gobject NetworkManager-libnm
+    dnf install -y libayatana-appindicator-gtk3 gnome-shell-extension-appindicator \
+        || echo "    (top-bar icon support not available on this system; skipping)"
 else
     echo "Unsupported distro: install NetworkManager-openvpn, python3-tk and python3-gi manually." >&2
 fi
@@ -49,7 +53,7 @@ find "$PREFIX" -name '__pycache__' -prune -exec rm -rf {} +
 
 cat > /usr/local/bin/vpnconnect <<EOF
 #!/bin/sh
-exec /usr/bin/python3 -P -c 'import sys; sys.path.insert(0, "$PREFIX"); from vpnconnect.cli import main; sys.exit(main())' "\$@"
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "$PREFIX"); from vpnconnect.cli import main; sys.exit(main())' "\$@"
 EOF
 chmod 755 /usr/local/bin/vpnconnect
 

@@ -7,6 +7,11 @@ share a process here).
 
 Threading (BR-TRAY-02): NetworkManager calls run in worker threads; results
 reach GTK through GLib.idle_add. The tray never touches a password (BR-TRAY-01).
+
+Signals: SIGUSR1 means "open the window". Its default action kills a process,
+so both the tray and the window child neutralise it before anyone can learn
+their pid (the tray before it writes the lock, the child before Python even
+imports the app).
 """
 
 from __future__ import annotations
@@ -17,14 +22,17 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from . import nm, settings
 
 POLL_SECONDS = 3  # FR-TRAY-02
+HOST_WAIT_SECONDS = 20  # autostart may run before GNOME has loaded the extension
 ICON_CONNECTED = "network-vpn-symbolic"
 ICON_CONNECTING = "network-vpn-acquiring-symbolic"
 ICON_OFF = "network-vpn-disconnected-symbolic"
+WATCHER = "org.kde.StatusNotifierWatcher"
 
 
 # ---- Gtk-free logic (BR-TRAY-03) ----------------------------------------------------
@@ -40,16 +48,22 @@ def view(status: nm.Status) -> tuple[str, str, bool]:
     return ICON_OFF, "Not connected", False
 
 
+def is_active(status: nm.Status) -> bool:
+    return status.connected or status.state == "connecting"
+
+
 def runtime_dir() -> Path:
-    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/vpnconnect-{os.getuid()}"
-    path = Path(base) / "vpnconnect"
+    """Per-user private dir for the lock. Never a shared, guessable /tmp path."""
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    path = Path(base) / "vpnconnect" if base else Path.home() / ".cache" / "vpnconnect"
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return path
 
 
 def acquire_lock(path: Path):
     """Single instance per session (FR-TRAY-01). Returns the open lock file, or None if taken."""
-    fh = open(path, "a+")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fh = os.fdopen(fd, "r+")
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -73,10 +87,18 @@ def running_pid(path: Path) -> int | None:
 
 
 def window_command() -> list[str]:
-    """The window as a child process, from the same install as this tray (FR-TRAY-04)."""
+    """The window as a child process, from the same install as this tray (FR-TRAY-04).
+
+    SIGUSR1 is ignored first thing, so an Open that arrives while the window is
+    still starting cannot kill it; gui.run installs the real handler later.
+    """
     root = str(Path(__file__).resolve().parent.parent)
-    boot = f"import sys; sys.path.insert(0, {root!r}); from vpnconnect.cli import main; sys.exit(main())"
-    return [sys.executable, "-P", "-c", boot, "gui", "--from-tray"]
+    boot = (
+        "import signal; signal.signal(signal.SIGUSR1, signal.SIG_IGN); "
+        f"import sys; sys.path.insert(0, {root!r}); "
+        "from vpnconnect.cli import main; sys.exit(main())"
+    )
+    return [sys.executable, "-I", "-c", boot, "gui", "--from-tray"]
 
 
 def load_indicator():
@@ -96,6 +118,32 @@ def load_indicator():
         except (ImportError, ValueError, AttributeError):
             continue
     return None
+
+
+def has_icon_host(GLib) -> bool:
+    """Is something on the session bus able to show our icon (the AppIndicator extension)?"""
+    try:
+        from gi.repository import Gio
+
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+            "NameHasOwner", GLib.Variant("(s)", (WATCHER,)), GLib.VariantType("(b)"),
+            Gio.DBusCallFlags.NONE, 1000, None,
+        )
+        return bool(reply.unpack()[0])
+    except Exception:  # cannot tell: assume yes rather than hide the icon
+        return True
+
+
+def wait_for_icon_host(GLib, seconds: float) -> bool:
+    end = time.monotonic() + seconds
+    while True:
+        if has_icon_host(GLib):
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(1)
 
 
 # ---- the indicator --------------------------------------------------------------------
@@ -136,10 +184,16 @@ class Tray:
 
     # status
     def _poll(self):
+        if self.child is not None and self.child.poll() is not None:
+            self.child = None  # reap a closed window (no zombies)
         if not self.polling and not self.quitting:
             self.polling = True
             threading.Thread(target=self._fetch, daemon=True).start()
         return True  # keep the timer
+
+    def _poll_once(self):
+        self._poll()
+        return False
 
     def _fetch(self):
         try:
@@ -161,6 +215,8 @@ class Tray:
     # actions
     def open_window(self):
         """FR-TRAY-04: one window; raise it if it is already open."""
+        if self.quitting:
+            return
         if self.child is not None and self.child.poll() is None:
             self.child.send_signal(signal.SIGUSR1)
         else:
@@ -170,32 +226,46 @@ class Tray:
         def job():
             try:
                 nm.disconnect(self.cfg.connection_name)
-            except nm.VPNError:
+            except Exception:
                 pass
-            self._fetch()
+            self.GLib.idle_add(self._poll_once)  # refresh through the normal, guarded path
 
         threading.Thread(target=job, daemon=True).start()
 
     def quit(self):
-        """FR-TRAY-06 / BR-TRAY-04: quitting VPNConnect honours disconnect_on_exit."""
+        """FR-TRAY-06 / BR-TRAY-04: quitting VPNConnect honours disconnect_on_exit.
+
+        Also used at logout (SIGTERM). The window is closed first so it cannot
+        start a new connection, then the state is read fresh, never from the
+        last poll.
+        """
         if self.quitting:
             return
         self.quitting = True
-        active = self.status.connected or self.status.state == "connecting"
+        child = self.child
 
         def job():
-            if active and self.cfg.disconnect_on_exit:
-                try:
-                    nm.disconnect(self.cfg.connection_name)
-                except nm.VPNError:
-                    pass
-            self.GLib.idle_add(self._finish)
+            try:
+                if child is not None and child.poll() is None:
+                    child.terminate()
+                    try:
+                        child.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                if self.cfg.disconnect_on_exit:
+                    try:
+                        if is_active(nm.status(self.cfg.connection_name)):
+                            nm.disconnect(self.cfg.connection_name)
+                    except Exception:
+                        pass
+            finally:
+                self.GLib.idle_add(self._finish)
 
         threading.Thread(target=job, daemon=True).start()
 
     def _finish(self):
         if self.child is not None and self.child.poll() is None:
-            self.child.terminate()
+            self.child.kill()
         self.Gtk.main_quit()
         return False
 
@@ -204,40 +274,51 @@ class Tray:
         return True
 
     def _on_stop_signal(self):
-        # Logout / kill: just go away. The session ending is not "quit VPNConnect".
-        self._finish()
-        return False
+        # Logout counts as quitting VPNConnect (DECISIONS 2026-11-19, BR-TRAY-04).
+        self.quit()
+        return True
+
+
+def _plain_window(cfg: settings.Settings) -> int:
+    from .gui import run as run_window
+
+    return run_window(cfg)
 
 
 def run(cfg: settings.Settings, open_window: bool = False) -> int:
+    # An "open" can arrive as soon as our pid is in the lock file, long before
+    # GTK is up. Remember it instead of dying (SIGUSR1's default action).
+    pending = {"open": open_window}
+    signal.signal(signal.SIGUSR1, lambda *_a: pending.update(open=True))
+
     lock_path = runtime_dir() / "tray.lock"
     lock = acquire_lock(lock_path)
     if lock is None:  # a tray is already running in this session
         if open_window:
-            pid = running_pid(lock_path)
-            if pid:
-                os.kill(pid, signal.SIGUSR1)  # FR-TRAY-07: ask it to open the window
-                return 0
-        else:
-            return 0
+            for _ in range(20):  # it may not have written its pid yet
+                pid = running_pid(lock_path)
+                if pid:
+                    os.kill(pid, signal.SIGUSR1)  # FR-TRAY-07: ask it to open the window
+                    break
+                time.sleep(0.05)
+        return 0  # never start a second tray
 
     libs = load_indicator()
+    if libs is not None and not wait_for_icon_host(libs[1], 0 if open_window else HOST_WAIT_SECONDS):
+        libs = None  # bindings present but nothing can show the icon (extension off)
     if libs is None:
-        if lock is not None:
-            lock.close()
-        if open_window:  # FR-TRAY-07: no top-bar support, plain window as before
-            from .gui import run as run_window
-
-            return run_window(cfg)
-        print("vpnconnect tray: top-bar icon support is not installed "
-              "(gir1.2-ayatanaappindicator3-0.1).", file=sys.stderr)  # FR-TRAY-09
+        lock.close()
+        if pending["open"]:  # FR-TRAY-07: no top-bar icon possible, plain window as before
+            return _plain_window(cfg)
+        print("vpnconnect tray: the top bar cannot show the icon here (needs "
+              "gir1.2-ayatanaappindicator3-0.1 and GNOME's AppIndicator extension).",
+              file=sys.stderr)  # FR-TRAY-09
         return 2
 
     Gtk, GLib, AI = libs
-    tray = Tray(cfg, Gtk, GLib, AI)
-    if open_window:
+    tray = Tray(cfg, Gtk, GLib, AI)  # installs GLib's SIGUSR1 handler
+    if pending["open"]:
         tray.open_window()
     Gtk.main()
-    if lock is not None:
-        lock.close()
+    lock.close()
     return 0

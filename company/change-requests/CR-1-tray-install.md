@@ -31,3 +31,9 @@ Users start `vpnconnect tray` by hand; there is no autostart and no menu integra
 
 ---
 _CEO decision and remarks:_ APPROVED 2026-11-19. Directly requested by the owner; additive; the layout is preserved.
+
+## Amendment 1 (2026-11-19, from the tray audit, finding 10)
+- `install.sh`: install the indicator packages in a separate, non-fatal step, so a distro without them still gets the app.
+- `install.sh`: the wrapper uses `python3 -I` instead of `-P`, because `-P` needs Python 3.11 and broke Ubuntu 22.04 and Debian 11. `-I` also keeps the current directory off `sys.path`.
+
+_CEO decision:_ APPROVED. Same blast radius as above.

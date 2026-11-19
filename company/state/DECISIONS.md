@@ -7,3 +7,8 @@
 - Closing the window while connected **or still connecting** disconnects (OQ-GUI-01 kept; extended so a half-started connection is not left running).
 - Taken from the designer's proposals: rescan Downloads on focus, inline validation, a "connection dropped" note, and the no-OTP auth copy. Deferred: a Cancel button while connecting, and a contrast unit test.
 - The tests gate now runs `python3 -m unittest discover -s tests`. `tests/test_gui.py` needs a display and skips without one.
+
+## 2026-11-19 - tray (CEO, owner can veto)
+- BR-TRAY-04: `disconnect_on_exit` means "quitting VPNConnect". That is the icon's **Quit**, **logging out** (the session sends SIGTERM to the icon), or closing a window that was *not* opened from the icon. Closing a window opened from the icon keeps the VPN up; the icon owns the connection. Logout was added after the audit (finding 4), so that a shared machine is not left connected.
+- With the icon libraries present but no top-bar host (AppIndicator extension off), the menu launcher falls back to the plain window, where closing disconnects. Autostart waits up to 20 s for the host, then exits quietly.
+- The installer treats top-bar icon packages as optional, and the wrapper runs `python3 -I` so Python 3.10 works (CR-1 amendment 1).

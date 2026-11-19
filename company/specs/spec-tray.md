@@ -1,7 +1,7 @@
 # SPEC: Top-bar VPN icon, installed for good
 
 _Type: feature. Author: CEO. Date: 2026-11-19._
-_Status: SPEC-READY._
+_Status: SHIPPED on branch vpn-icon-easy-install (audit HALT fixed, see RESUME)._
 
 ## Part 1 - Product requirements
 
@@ -63,8 +63,8 @@ US-TRAY-4: As an employee, closing the window does not kill my VPN; the icon kee
 - BR-TRAY-01: The tray never asks for or handles a password; Connect happens only in the window.
 - BR-TRAY-02: No NetworkManager call on the GTK main loop (threads + `GLib.idle_add`).
 - BR-TRAY-03: Pure logic (icon/menu text from status, lock/pid helpers) is Gtk-free and unit-tested.
-- BR-TRAY-04: `disconnect_on_exit` now means "quitting VPNConnect" (tray Quit, or closing a window
-  that was not started from the tray). Recorded in DECISIONS for owner veto.
+- BR-TRAY-04: `disconnect_on_exit` now means "quitting VPNConnect" (tray Quit, logout, or closing a
+  window that was not started from the tray). Recorded in DECISIONS for owner veto.
 
 ### Scope
 **In:** `vpnconnect/tray.py` (new), `vpnconnect/gui.py` (`--from-tray` close behaviour, SIGUSR1 raise),

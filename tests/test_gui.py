@@ -178,10 +178,15 @@ class GuiTests(unittest.TestCase):
         a.on_close()
         self.assertNotIn("disconnect", self.calls)
 
-    def test_raise_event_is_handled(self):
+    def test_real_sigusr1_raises_window(self):
+        import signal as sig
+
         app = self.app()
+        old = sig.getsignal(sig.SIGUSR1)
+        self.addCleanup(sig.signal, sig.SIGUSR1, old)
+        gui.install_raise_handler(app)
         with mock.patch.object(app, "bring_to_front") as front:
-            app.events.put(("raise", None))
+            os.kill(os.getpid(), sig.SIGUSR1)
             self.pump(lambda: front.called)
 
     def test_unexpected_drop_shows_note(self):

@@ -210,13 +210,14 @@ class App:
                     self.busy = False
                     self.connecting = False
                     self._sync()
-                elif kind == "raise":
-                    self.bring_to_front()
                 elif kind == "closed":
                     self._destroy()
                     return
         except queue.Empty:
             pass
+        if self.raise_requested:  # set by the SIGUSR1 handler (install_raise_handler)
+            self.raise_requested = False
+            self.bring_to_front()
         self.root.after(POLL_MS, self._poll)
 
     def _refresh_loop(self):
@@ -477,7 +478,7 @@ class App:
         self.disconnect_btn.focus_set()
         if self.from_tray:
             ttk.Label(b, text="You can close this window. The VPN stays on until you disconnect\n"
-                              "from the VPN icon in the top bar.", style="Muted.TLabel",
+                              "from the top-bar icon.", style="Muted.TLabel",
                       justify="left").pack(anchor="w", pady=(10, 0))
         elif self.cfg.disconnect_on_exit:  # OQ-GUI-01 assumption: closing still disconnects
             ttk.Label(b, text="Closing this window disconnects the VPN.", style="Muted.TLabel").pack(
@@ -696,10 +697,21 @@ def show_problems(problems: list[str]) -> None:
     root.mainloop()
 
 
+def install_raise_handler(app: "App") -> None:
+    """SIGUSR1 from the tray = "show yourself" (FR-TRAY-04).
+
+    The handler only sets a flag: it may interrupt the main thread anywhere,
+    including inside a queue operation, so it must not take any lock.
+    """
+    def handler(_signum, _frame):
+        app.raise_requested = True
+
+    signal.signal(signal.SIGUSR1, handler)
+
+
 def run(cfg: settings.Settings, from_tray: bool = False) -> int:
     root = tk.Tk(className="vpnconnect")
     app = App(root, cfg, from_tray=from_tray)
-    # SIGUSR1 from the tray = "show yourself". The handler only queues; _poll acts on it.
-    signal.signal(signal.SIGUSR1, lambda *_a: app.events.put(("raise", None)))
+    install_raise_handler(app)
     root.mainloop()
     return 0

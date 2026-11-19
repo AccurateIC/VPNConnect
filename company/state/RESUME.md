@@ -18,7 +18,7 @@
 - `get.sh` is the one-line installer (curl | sudo bash) and downloads `main` by default. Until this branch merges, use `VPNCONNECT_REF=vpn-icon-easy-install`.
 - README fully rewritten for employees + IT.
 - Verified live on the owner's Ubuntu 24.04: the icon is registered and visible (company/evidence/tray). Gates green, 46 tests.
-- The tray auditor pass was still running at push time. Apply its findings as a follow-up commit on the same branch.
+- The tray audit returned HALT (two startup signal races, a stale-status Quit, a queue put inside a signal handler, logout policy, no icon host, installer). All fixed in a follow-up commit, with regression tests (53 tests). The auditor's own race scripts now pass: 3/3 tray runs survive, and a double Open leaves one window. Live menu evidence: the owner clicked through the icon menu on 2026-11-19 ("it works").
 
 ## Next
 - `/company` is open. Candidate work, cheapest first: add tests for import_profile and `_ensure_profile` (WORRIES #2), and add a CI workflow that runs the two gates.

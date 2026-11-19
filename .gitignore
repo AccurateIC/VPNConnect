@@ -1,0 +1,12 @@
+# Never commit VPN profiles or credentials
+*.ovpn
+*.pem
+*.key
+*.p12
+credentials*
+cred*.txt
+vpnconnect.conf
+
+__pycache__/
+*.pyc
+.venv/

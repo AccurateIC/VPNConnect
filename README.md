@@ -1,103 +1,107 @@
+# VPNConnect
 
-# VPN Starter Script
+Internal VPN client for employees on Linux (Ubuntu / Debian / Fedora).
+A small app (GUI + command line) for connecting to the company Sophos / OpenVPN gateway.
 
-This Bash script automates the process of connecting to a VPN using the first `.ovpn` configuration file found in a specified directory.
+- **No admin rights needed** to connect. The app uses NetworkManager instead of running `openvpn` with `sudo`.
+- **Passwords are never saved to disk.** You type your password each time, and it goes straight to NetworkManager.
+- **Each profile belongs to one user.** On a shared machine, other people can't see or use your VPN profile.
+- **Company DNS and routes work**, because NetworkManager applies them. The VPN also shows up in the normal GNOME network menu.
+- **Optional OTP field and auto-disconnect timer**, both set by IT.
 
-## 📜 Description
+---
 
-- Checks if **OpenVPN** is installed.
-- Searches for the first `.ovpn` file in the `./vpn` directory.
-- Starts the VPN connection using `sudo openvpn`.
+## For employees
 
-## 📁 Directory Structure
+### 1. Get your VPN profile
 
-Your project should have the following structure:
+Download your personal `.ovpn` file from the company VPN portal. Ask IT for the address, or use the
+**Get profile** button in the app if IT has set it up.
 
-```
-.
-├── start-vpn.sh        # This script
-└── vpn/
-    └── your-config.ovpn
-```
+### 2. Connect
 
-## 🛠️ Prerequisites
+Open **VPNConnect** from the applications menu:
 
-- Linux-based system
-- `openvpn` installed
+1. Click **Import .ovpn …** and choose the file you downloaded (you only do this once).
+2. Enter your username and password, plus your OTP code if asked.
+3. Click **Connect**.
 
-Install OpenVPN if not already installed:
+Closing the window disconnects the VPN.
 
-```bash
-sudo apt update
-sudo apt install openvpn
-```
-## 🌐 Download VPN Configuration
-
-You can download the required `.ovpn` configuration file from the following link:
-
-🔗 [Download .ovpn file](https://49.248.149.138)
-
-Place the downloaded file inside the `vpn/` directory.
-
-## 🖼️ Screenshot
-![alt text](<Untitled design.png>)
-## 🚀 Usage
-
-1. Make sure the script is executable:
+### Command line
 
 ```bash
-chmod +x start-vpn.sh
+vpnconnect import ~/Downloads/myname.ovpn   # once
+vpnconnect connect                          # asks for password
+vpnconnect status                           # exit code 0 when connected
+vpnconnect disconnect
+vpnconnect remove                           # delete your profile
 ```
 
-2. Run the script:
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| "Authentication failed" | Check your username and password. If OTP is enabled, use a fresh code. |
+| "OpenVPN plugin is missing" | Ask IT to run `install.sh` on your machine. |
+| Connected, but internal sites don't open | Run `vpnconnect disconnect`, then `connect` again. If that doesn't help, send IT the output of `journalctl -t nm-openvpn -n 50`. |
+| Got a new profile from the portal | Import it again. It replaces the old one. |
+
+---
+
+## For IT: installing on a machine
 
 ```bash
-./start-vpn.sh
+git clone https://github.com/AccurateIC/VPNConnect.git
+cd VPNConnect
+sudo ./install.sh
 ```
 
-The script will:
-- Notify you if OpenVPN is missing.
-- Look for `.ovpn` files in the `vpn` directory.
-- Start the VPN using the first `.ovpn` file found.
+This installs the dependencies (`network-manager-openvpn-gnome`, `python3-tk`, `python3-gi`, `gir1.2-nm-1.0`),
+copies the app to `/opt/vpnconnect`, adds the `vpnconnect` command and a menu entry, and creates
+`/etc/vpnconnect/vpnconnect.conf`.
 
-## ⚠️ Notes
-
-- You may be prompted for `sudo` password to start the VPN.
-- If no `.ovpn` file is found, the script exits with an error message.
-- Only the **first** `.ovpn` file found will be used.
-
-## ✅ Example Output
-
-```
-🔐 Starting VPN using config: ./vpn/myvpn.ovpn
-```
-
-If OpenVPN is not installed:
-
-```
-❌ OpenVPN is not installed. Run 'sudo apt install openvpn'
-```
-
-If no `.ovpn` file is found:
-
-```
-❌ No .ovpn file found in ./vpn
-```
-
-## ▶️ Running the Script
-
-To run the script:
-
-1. Give it executable permissions (if not already):
+If everyone shares the same profile, IT can pre-install it. Each user gets it imported automatically the first time they run the app:
 
 ```bash
-chmod +x start-vpn.sh
+sudo ./install.sh --profile /path/to/company.ovpn   # stored as /etc/vpnconnect/profile.ovpn
 ```
 
-2. Execute the script:
+To uninstall, run `sudo ./uninstall.sh`.
+
+### Settings: `/etc/vpnconnect/vpnconnect.conf`
+
+```ini
+[vpnconnect]
+connection_name = Company VPN     # name in the app and the network menu
+portal_url =                      # VPN portal link, shown as the "Get profile" button
+session_limit_minutes = 0         # auto-disconnect after N minutes (0 = never)
+otp = false                       # show an OTP field; the code is added after the password
+disconnect_on_exit = true
+```
+
+Users can override any of these in `~/.config/vpnconnect/vpnconnect.conf`.
+
+> Keep the real portal URL, gateway address and `.ovpn` files **out of this repository**.
+> `.gitignore` already blocks `*.ovpn`, keys and credential files.
+
+---
+
+## Development
 
 ```bash
-./start-vpn.sh
+python3 -m vpnconnect --help         # run from the checkout, no install needed
+python3 -m unittest tests.test_vpnconnect
 ```
 
-Make sure you have at least one `.ovpn` file in the `vpn/` directory before running.
+Layout:
+
+```
+vpnconnect/
+  nm.py        NetworkManager integration (libnm import, nmcli connect/disconnect/status)
+  gui.py       Tkinter UI (network calls run in worker threads)
+  cli.py       command line entry point
+  settings.py  /etc + ~/.config settings
+packaging/     .desktop launcher, example config
+install.sh     system-wide installer
+```

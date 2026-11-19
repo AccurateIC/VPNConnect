@@ -10,3 +10,14 @@ vpnconnect.conf
 __pycache__/
 *.pyc
 .venv/
+
+# claude-company local runtime state (never commit)
+.claude/worktrees/
+.claude/agent-memory/
+company/state/provenance-ledger.json
+company/state/active-task.json
+company/state/.update-backups/
+company/state/adherence.log
+company/state/gates.status
+company/state/gates.log
+company/state/gate-output/

@@ -36,7 +36,14 @@ class Friendly:
     next_step: str
 
 
+# Prefix the GUI puts on an auth failure that happened with the saved password.
+SAVED_REJECTED = "The saved password was rejected and has been forgotten: "
+
 ERRORS = {
+    "saved_auth": Friendly(
+        "Your saved password didn't work, so it was removed.",
+        "Type your current password.",
+    ),
     "auth": Friendly(
         "Wrong username, password or code.",
         "Check them and try again. If you use a code, wait for a new one.",
@@ -68,9 +75,13 @@ def classify_error(message: str) -> str:
     """Map a raw VPNError message to an ERRORS key."""
     # Judge only our own message: nm.connect appends the raw OpenVPN log, whose
     # lines (e.g. PLUGIN_INIT) must not be mistaken for a missing plugin.
+    if message.startswith(SAVED_REJECTED):
+        return "saved_auth"
     head, _, log = message.partition("OpenVPN log:")
     text = head.lower()
-    if "authentication failed" in text or "auth_failed" in (text + log.lower()):
+    # FR-SAVE-10: nmcli's own reason too, not only the journal most users can't read.
+    if any(k in text for k in ("authentication failed", "login failed", "login/authentication")) \
+            or "auth_failed" in log.lower():
         return "auth"
     if "plugin" in text or "network-manager-openvpn" in text or "libnm" in text:
         return "plugin"

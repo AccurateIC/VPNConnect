@@ -19,7 +19,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-from . import __version__, nm, settings, ui_model
+from . import __version__, keyring_store, nm, settings, ui_model
 
 POLL_MS = 100
 TICK_MS = 1000
@@ -87,7 +87,8 @@ def _setup_style(root: tk.Tk) -> dict:
 
 
 class App:
-    def __init__(self, root: tk.Tk, cfg: settings.Settings, from_tray: bool = False):
+    def __init__(self, root: tk.Tk, cfg: settings.Settings, from_tray: bool = False,
+                 initial_error: str | None = None):
         self.root, self.cfg = root, cfg
         # FR-TRAY-05: opened from the top-bar icon, the icon owns the connection,
         # so closing the window never disconnects.
@@ -99,11 +100,18 @@ class App:
         self.load_failed = False  # status could not be read at all
         self.limit_retry_at = 0.0
         self.offered = None  # .ovpn currently offered on the Setup screen
+        # Saved password (spec-save-password). Only WHETHER one exists is known on
+        # the main thread; the password itself is read inside the connect worker.
+        self.keyring_ok = False
+        self.saved_user: str | None = None
+        self.using_saved = False
+        self.saved_dirty = False
         self.busy = False
         self.connecting = False
         self.closing = False
         self.connected_at: float | None = None
-        self.error: ui_model.Friendly | None = None
+        # The tray's one-click Connect failed and opened us to explain why (FR-SAVE-07).
+        self.error: ui_model.Friendly | None = ui_model.ERRORS.get(initial_error or "")
         self.notice = ""
         self.screen = ""
         self.details_open = False
@@ -203,12 +211,20 @@ class App:
                         self.load_failed = True
                         self.error = ui_model.friendly_error(payload)
                         self._sync()
+                elif kind == "saved":
+                    if (self.keyring_ok, self.saved_user) != payload:
+                        self.keyring_ok, self.saved_user = payload
+                        self.saved_dirty = True  # redraw Sign in once the UI is idle
+                    self._update_menu()
                 elif kind == "notice":
                     self.notice = payload
                     self._render(force=True)
                 elif kind == "idle":
                     self.busy = False
                     self.connecting = False
+                    if self.saved_dirty and self.screen == ui_model.SIGN_IN:
+                        self._render(force=True)
+                    self.saved_dirty = False
                     self._sync()
                 elif kind == "closed":
                     self._destroy()
@@ -244,13 +260,14 @@ class App:
         kind = ui_model.classify_error(raw)
         self.error = ui_model.friendly_error(raw, otp=self.cfg.otp)
         self.notice = ""
-        on_sign_in = self.screen == ui_model.SIGN_IN and hasattr(self, "password")
-        if on_sign_in:
+        if self.screen == ui_model.SIGN_IN and getattr(self, "password", None) is not None:
             self.password.delete(0, "end")
         self._render(force=True)
-        if on_sign_in and self.screen == ui_model.SIGN_IN:
+        if self.screen == ui_model.SIGN_IN:
             # Only a wrong password sends you back to the password field.
-            (self.password if kind == "auth" else self.connect_btn).focus_set()
+            pw = getattr(self, "password", None)
+            wrong = kind in ("auth", "saved_auth") and pw is not None
+            (pw if wrong else self.connect_btn).focus_set()
 
     def _tick(self):
         """Once a second: connected timer, session countdown, session limit."""
@@ -330,7 +347,9 @@ class App:
         screen = self._current_screen()
         if screen == self.screen and not force:
             return
-        typed_user = self.username.get() if self.screen == ui_model.SIGN_IN else ""
+        typed_user = ""
+        if self.screen == ui_model.SIGN_IN and getattr(self, "username", None) is not None:
+            typed_user = self.username.get()
         self.screen = screen
         for child in self.body.winfo_children():
             child.destroy()
@@ -424,6 +443,11 @@ class App:
         b.columnconfigure(0, weight=1)
         ttk.Label(b, text="Sign in to connect", style="Heading.TLabel").pack(anchor="w", pady=(0, 12))
         self._message_box(b)
+        self.remember = None
+        self.using_saved = bool(self.saved_user) and self.cfg.allow_save_password
+        if self.using_saved:
+            self._build_sign_in_saved()
+            return
 
         ttk.Label(b, text="Username").pack(anchor="w")
         self.username = ttk.Entry(b)
@@ -452,6 +476,13 @@ class App:
             self.otp.pack(anchor="w", pady=(2, 0))
             self.sign_in_inputs.append(self.otp)
 
+        if self.cfg.allow_save_password and self.keyring_ok:  # FR-SAVE-02, opt-in
+            self.remember = tk.BooleanVar(value=False)
+            box = ttk.Checkbutton(b, text="Remember my password on this computer",
+                                  variable=self.remember)
+            box.pack(anchor="w", pady=(10, 0))
+            self.sign_in_inputs.append(box)
+
         self.connect_btn = ttk.Button(b, text="Connect", style="Primary.TButton", command=self.on_connect)
         self.connect_btn.pack(fill="x", pady=(16, 0))
 
@@ -460,6 +491,36 @@ class App:
             w.bind("<KeyPress>", self._caps_check, add="+")
             w.bind("<KeyRelease>", self._caps_check, add="+")
         (self.password if self.username.get() else self.username).focus_set()
+
+    def _build_sign_in_saved(self):
+        """FR-SAVE-03: a password is saved, so one click connects."""
+        b = self.body
+        row = ttk.Frame(b)
+        row.pack(fill="x")
+        ttk.Label(row, text=f"Signed in as {self.saved_user}").pack(side="left")
+        change = ttk.Button(row, text="Change user", style="Link.TButton", command=self.on_forget)
+        change.pack(side="right")
+        row = ttk.Frame(b)
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text="Password: saved on this computer", style="Muted.TLabel").pack(side="left")
+        forget = ttk.Button(row, text="Forget", style="Link.TButton", command=self.on_forget)
+        forget.pack(side="right")
+        self.sign_in_inputs = [change, forget]
+        self.username = self.password = None
+        self.caps_var = tk.StringVar(value="")
+
+        self.otp = None
+        if self.cfg.otp:
+            ttk.Label(b, text="Code from your authenticator app").pack(anchor="w", pady=(12, 0))
+            self.otp = ttk.Entry(b, width=12, exportselection=False)
+            self.otp.pack(anchor="w", pady=(2, 0))
+            self.otp.bind("<Return>", lambda _e: self.on_connect())
+            self.sign_in_inputs.append(self.otp)
+
+        self.connect_btn = ttk.Button(b, text="Connect", style="Primary.TButton", command=self.on_connect)
+        self.connect_btn.pack(fill="x", pady=(16, 0))
+        self.connect_btn.bind("<Return>", lambda _e: self.on_connect())
+        (self.otp or self.connect_btn).focus_set()
 
     def _build_connected(self):
         """FR-GUI-04."""
@@ -493,6 +554,8 @@ class App:
         if self.status.exists:
             m.add_command(label="Change VPN file...", command=self.on_choose_file, state=idle)
             m.add_command(label="Remove VPN file from this computer...", command=self.on_remove, state=idle)
+        if self.saved_user:
+            m.add_command(label="Forget saved password", command=self.on_forget, state=idle)
         if self.cfg.portal_url:
             m.add_command(label="Open VPN portal", command=self.open_portal)
         if m.index("end") is not None:
@@ -538,6 +601,27 @@ class App:
         if not st.exists and settings.SYSTEM_PROFILE.is_file():
             self.log("Adding the company VPN file...")
             nm.import_profile(settings.SYSTEM_PROFILE, self.cfg.connection_name)
+            st = nm.status(self.cfg.connection_name)
+        if not self.cfg.allow_save_password:  # FR-SAVE-08: IT forbids saved passwords
+            keyring_store.forget(self.cfg.connection_name)
+        self._report_saved(st.username)
+
+    def _report_saved(self, username: str):
+        """Worker side: tell the UI whether a password is saved (never the password)."""
+        conn = self.cfg.connection_name
+        ok = self.cfg.allow_save_password and keyring_store.available()
+        saved = username if ok and keyring_store.has_saved(conn, username) else None
+        self.events.put(("saved", (ok, saved)))
+
+    def on_forget(self):
+        """FR-SAVE-06."""
+        def job():
+            keyring_store.forget(self.cfg.connection_name)
+            self.log("Saved password forgotten.")
+            self._report_saved("")
+
+        self.error, self.notice = None, ""
+        self._background(job)
 
     def on_choose_file(self):
         path = filedialog.askopenfilename(
@@ -564,6 +648,9 @@ class App:
     def on_connect(self):
         if self.busy or self.closing or not self.status.exists or self.status.connected:
             return
+        if self.using_saved:
+            self._connect_saved()
+            return
         username = self.username.get().strip()
         password = self.password.get()
         code = self.otp.get().strip() if self.otp is not None else ""
@@ -579,15 +666,64 @@ class App:
             self._render(force=True)  # rebuilds the form, so look the field up afterwards
             getattr(self, missing[0]).focus_set()
             return
-        password += code
         self.error, self.notice = None, ""
         self.connecting = True
         previous_user = self.status.username
+        remember = bool(self.remember is not None and self.remember.get())
+        conn = self.cfg.connection_name
 
         def job():
             self.log(f"Connecting as {username}...")
-            nm.connect(self.cfg.connection_name, password,
-                       username if username != previous_user else "")
+            nm.connect(conn, password + code, username if username != previous_user else "")
+            self.log("Connected.")
+            if remember:  # FR-SAVE-04: only after success, and never the one-time code
+                if keyring_store.store(conn, username, password):
+                    self.log("Password saved in your keyring.")
+                else:
+                    self.log("Could not save the password in the keyring.")
+                self._report_saved(username)
+            elif not keyring_store.has_saved(conn, username):
+                # Signed in as someone without a saved password: drop any other user's item,
+                # so a password never lingers in the keyring with no Forget button for it.
+                keyring_store.forget(conn)
+                self._report_saved(username)
+
+        self._background(job)
+        self._render(force=True)
+        self._sync()
+
+    def _connect_saved(self):
+        """FR-SAVE-03 / FR-SAVE-05: connect with the saved password, read in the worker."""
+        code = ""
+        if self.otp is not None:
+            code = self.otp.get().strip()
+            self.otp.delete(0, "end")
+            if not code:
+                self.error = ui_model.Friendly("Fill in your code.", "Then press Connect.")
+                self._render(force=True)
+                if self.otp is not None:
+                    self.otp.focus_set()
+                return
+        self.error, self.notice = None, ""
+        self.connecting = True
+        username, conn = self.saved_user, self.cfg.connection_name
+
+        def job():
+            password = keyring_store.lookup(conn, username)
+            if not password:
+                self._report_saved("")
+                raise nm.VPNError("The saved password could not be read from the keyring.")
+            self.log(f"Connecting as {username} with your saved password...")
+            try:
+                nm.connect(conn, password + code)
+            except nm.VPNError as exc:
+                # With a code, AUTH_FAILED may just be a mistyped or expired code: keep the
+                # saved password and show the normal "wrong ... code" message.
+                if not code and ui_model.classify_error(str(exc)) == "auth":
+                    keyring_store.forget(conn)
+                    self._report_saved("")
+                    raise nm.VPNError(ui_model.SAVED_REJECTED + str(exc)) from None
+                raise
             self.log("Connected.")
 
         self._background(job)
@@ -614,7 +750,9 @@ class App:
             if self.status.connected:
                 nm.disconnect(self.cfg.connection_name)
             nm.delete(self.cfg.connection_name)
+            keyring_store.forget(self.cfg.connection_name)  # FR-SAVE-06
             self.log("VPN file removed.")
+            self._report_saved("")
 
         self.error, self.notice = None, ""
         self._background(job)
@@ -626,7 +764,7 @@ class App:
         messagebox.showinfo(
             "About VPNConnect",
             f"VPNConnect {__version__}\n\nConnects you to {self.cfg.connection_name}.\n"
-            "Your password is never saved.\n\nNeed help? Contact IT and use\n"
+            "Your password is saved only if you tick\n'Remember my password', and then only in\nyour own keyring.\n\nNeed help? Contact IT and use\n"
             "'Show details' > 'Copy for IT'.",
             parent=self.root,
         )
@@ -709,9 +847,9 @@ def install_raise_handler(app: "App") -> None:
     signal.signal(signal.SIGUSR1, handler)
 
 
-def run(cfg: settings.Settings, from_tray: bool = False) -> int:
+def run(cfg: settings.Settings, from_tray: bool = False, error: str | None = None) -> int:
     root = tk.Tk(className="vpnconnect")
-    app = App(root, cfg, from_tray=from_tray)
+    app = App(root, cfg, from_tray=from_tray, initial_error=error)
     install_raise_handler(app)
     root.mainloop()
     return 0

@@ -14,6 +14,7 @@ from __future__ import annotations
 import getpass
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -164,6 +165,7 @@ def connect(name: str, password: str, username: str = "") -> None:
         set_username(name, username)
     if "\n" in password:
         raise VPNError("Password must not contain a newline.")
+    started = int(time.time()) - 1  # only this attempt's OpenVPN log lines count
     proc = _run(
         ["--wait", str(CONNECT_TIMEOUT), "connection", "up", "id", name, "passwd-file", "/dev/stdin"],
         input=f"vpn.secrets.password:{password}\n",
@@ -171,7 +173,7 @@ def connect(name: str, password: str, username: str = "") -> None:
     )
     if proc.returncode != 0:
         detail = _err(proc)
-        log = recent_openvpn_log()
+        log = recent_openvpn_log(since=started)
         if "AUTH_FAILED" in log:
             detail = "Authentication failed - check your username, password (and OTP)."
         elif log:
@@ -185,11 +187,17 @@ def disconnect(name: str) -> None:
         raise VPNError(_err(proc))
 
 
-def recent_openvpn_log(lines: int = 12) -> str:
-    """Best effort: last nm-openvpn journal lines (needs the user to be in group adm/systemd-journal)."""
+def recent_openvpn_log(lines: int = 12, since: int | None = None) -> str:
+    """Best effort: nm-openvpn journal lines since `since` (epoch seconds; default the last
+    2 minutes). Needs the user to be in group adm/systemd-journal.
+
+    An old AUTH_FAILED from an earlier attempt must not make this attempt look like a
+    wrong password, because that now deletes a saved password (spec-save-password).
+    """
+    since_arg = f"@{since}" if since is not None else "-2min"
     try:
         proc = subprocess.run(
-            ["journalctl", "-t", "nm-openvpn", "--since", "-2min", "-n", str(lines), "-o", "cat", "--no-pager"],
+            ["journalctl", "-t", "nm-openvpn", "--since", since_arg, "-n", str(lines), "-o", "cat", "--no-pager"],
             capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):

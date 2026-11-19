@@ -17,3 +17,7 @@ otp = false
 
 # Disconnect when the window is closed.
 disconnect_on_exit = true
+
+# Let employees tick "Remember my password on this computer". The password is kept only in
+# their own encrypted keyring. Set to false to forbid saved passwords (existing ones are deleted).
+allow_save_password = true

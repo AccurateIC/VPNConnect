@@ -23,6 +23,11 @@
 - 2026-11-19: the owner ran the github.com-archive install of the branch on their Ubuntu 24.04 machine. It installed, and the icon works (live end-to-end). The office/home network blocks raw.githubusercontent.com, so the README leads with the archive command.
 - Open: PR #2 (includes #1). After the merge, close #1 and re-test the `main` archive command on a second machine.
 
+## 2026-11-19 - save-password (opt-in "Remember my password", keyring only)
+- Owner-requested invariant change (BR-SAVE-01). CR-2 adds the setting `allow_save_password`, and amendment 1 stops users re-enabling it.
+- Audit: SHIP-WITH-FIXES. All findings are fixed with tests: a wrong OTP no longer deletes the saved password; the poll uses has_saved (no secret load, no unlock prompts); the journal is scoped to the current attempt; a failed tray connect opens the window with the reason; the IT off switch is enforceable; Quit during a one-click connect disconnects; another user's item is cleaned up.
+- 89 tests; the live keyring round trip passes with VPNCONNECT_KEYRING_TEST=1 (not part of the gate, because it touches the user keyring).
+
 ## Next
 - `/company` is open. Candidate work, cheapest first: add tests for import_profile and `_ensure_profile` (WORRIES #2), and add a CI workflow that runs the two gates.
 

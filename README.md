@@ -7,7 +7,9 @@ company network.
 Works on Ubuntu, Debian and Fedora (GNOME desktop).
 
 - **No admin rights needed to connect.** Only the one-time install needs `sudo`.
-- **Your password is never saved.** You type it each time; it goes straight to the system's network manager.
+- **Remember your password if you want to.** Tick **Remember my password on this computer** once and
+  next time it's one click. It is kept only in your own encrypted keyring (the same place your wifi
+  passwords live), never in a file. Don't tick it and you type it each time.
 - **Your VPN setup is yours alone.** On a shared computer, other people can't see or use it.
 - **Company sites and DNS just work**, and the VPN also shows up in the normal system network menu.
 
@@ -67,7 +69,9 @@ Can't find the portal or the file? Ask IT. Your `.ovpn` file is personal: don't 
    **Choose VPN file...** if you saved it somewhere else.
 3. Type your password (your username is remembered), plus the code from your authenticator app
    if you are asked for one.
-4. Press **Enter** or click **Connect**.
+4. Optional: tick **Remember my password on this computer**, so next time you just click **Connect**
+   (or choose **Connect** straight from the top-bar icon). The password is saved only after it worked.
+5. Press **Enter** or click **Connect**.
 
 The coloured bar at the top of the window tells you where you are:
 
@@ -100,7 +104,9 @@ If IT set a time limit, you are disconnected automatically after that time.
 | "VPNConnect can't start" window | Something is missing on this computer. Run the install command again, or ask IT. |
 | Connected, but internal sites don't open | Disconnect and connect again. If that doesn't help, use **Copy for IT**. |
 | Got a new VPN file from the portal | Window: **More** > **Change VPN file...** and pick the new file. It replaces the old one. |
-| Want to remove your VPN setup | Window: **More** > **Remove VPN file from this computer...** |
+| Changed your password | Just connect: the old saved password is removed automatically when it stops working. Then type the new one (and tick **Remember** again if you like). |
+| Want to stop saving your password | Window: **Forget** next to "Password: saved", or **More** > **Forget saved password**. |
+| Want to remove your VPN setup | Window: **More** > **Remove VPN file from this computer...** (also forgets a saved password) |
 
 ## Command line (optional)
 
@@ -111,7 +117,9 @@ vpnconnect import ~/Downloads/jsmith.ovpn   # once
 vpnconnect connect                           # asks for your password
 vpnconnect status                            # exit code 0 when connected, 3 when not
 vpnconnect disconnect
-vpnconnect remove                            # delete your VPN setup
+vpnconnect connect --ask                     # type the password even if one is saved
+vpnconnect forget-password                   # delete your saved password
+vpnconnect remove                            # delete your VPN setup (and saved password)
 vpnconnect tray                              # the top-bar icon (starts by itself at login)
 ```
 
@@ -178,9 +186,11 @@ portal_url =                      # VPN portal address: shows the "Download it f
 session_limit_minutes = 0         # disconnect automatically after N minutes (0 = never)
 otp = false                       # ask for an authenticator code; it is added after the password
 disconnect_on_exit = true         # quitting VPNConnect disconnects the VPN
+allow_save_password = true        # allow "Remember my password" (false = forbid; saved ones are deleted)
 ```
 
-Users can override any of these in `~/.config/vpnconnect/vpnconnect.conf`.
+Users can override any of these in `~/.config/vpnconnect/vpnconnect.conf`, except that they cannot
+turn `allow_save_password` back on once IT has set it to `false`.
 
 > This repository is **public**. Keep the real portal address, gateway address and any `.ovpn`
 > files **out of it**. `.gitignore` already blocks `*.ovpn`, keys and credential files. Set the
@@ -192,7 +202,11 @@ Users can override any of these in `~/.config/vpnconnect/vpnconnect.conf`.
   so employees don't need admin rights, and DNS from the VPN is applied correctly.
 - The `.ovpn` file is imported as a NetworkManager connection that belongs only to that user,
   set to **always ask** for the password. The password is passed to NetworkManager directly and
-  is never written to disk or shown in logs.
+  is never written to a file or shown in logs.
+- **Remember my password** is opt-in per user. The password is stored only in that user's keyring
+  (Secret Service / GNOME Keyring, encrypted and unlocked by their login), only after a successful
+  connection, and never together with an authenticator code. Other users on the same computer cannot
+  read it. IT can forbid it with `allow_save_password = false`.
 - The top-bar icon (`vpnconnect tray`) watches the connection state every few seconds and opens
   the window on request.
 

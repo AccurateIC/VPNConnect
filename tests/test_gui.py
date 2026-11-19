@@ -26,8 +26,9 @@ PASSWORD, CODE = "hunter2-S3cret", "987654"
 _KEEP = []
 
 
-@unittest.skipUnless(HAVE_DISPLAY, "needs a display")
-class GuiTests(unittest.TestCase):
+class GuiHarness(unittest.TestCase):
+    """Shared setup only; holds no tests, so subclasses don't re-run each other's."""
+
     def setUp(self):
         self.st = nm.Status(True, "disconnected", "alex")
         self.calls = []
@@ -94,6 +95,10 @@ class GuiTests(unittest.TestCase):
     def log_text(self, app):
         return app.log_box.get("1.0", "end")
 
+
+
+@unittest.skipUnless(HAVE_DISPLAY, "needs a display")
+class GuiTests(GuiHarness):
     # BR-GUI-01
     def test_password_never_in_details_and_fields_cleared(self):
         app = self.app(otp=True)
@@ -207,3 +212,200 @@ class GuiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeKeyring:
+    def __init__(self, test, available=True):
+        self.data = {}
+        self.ok = available
+        for name in ("available", "lookup", "store", "forget", "has_saved"):
+            p = mock.patch.object(keyring_store, name, side_effect=getattr(self, name))
+            p.start()
+            test.addCleanup(p.stop)
+
+    def available(self):
+        return self.ok
+
+    def lookup(self, conn, user):
+        return self.data.get((conn, user))
+
+    def store(self, conn, user, pw):
+        self.data = {k: v for k, v in self.data.items() if k[0] != conn}
+        self.data[(conn, user)] = pw
+        return True
+
+    def forget(self, conn):
+        self.data = {k: v for k, v in self.data.items() if k[0] != conn}
+
+    def has_saved(self, conn, user):
+        return (conn, user) in self.data
+
+
+from vpnconnect import keyring_store  # noqa: E402
+
+
+@unittest.skipUnless(HAVE_DISPLAY, "needs a display")
+class SavePasswordGuiTests(GuiHarness):
+    """spec-save-password"""
+
+    def setUp(self):
+        super().setUp()
+        self.kr = FakeKeyring(self)
+
+    def settle(self, app):
+        self.pump(lambda: not app.busy and app.events.empty())
+        for _ in range(5):
+            self.root.update()
+
+    def test_checkbox_off_by_default_and_saves_only_after_success(self):  # FR-SAVE-02/04
+        app = self.app(otp=True)
+        self.settle(app)
+        self.assertIsNotNone(app.remember)
+        self.assertFalse(app.remember.get())
+        app.remember.set(True)
+        app.password.insert(0, PASSWORD)
+        app.otp.insert(0, CODE)
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {("Company VPN", "alex"): PASSWORD})  # code never saved
+        self.assertNotIn(PASSWORD, self.log_text(app))
+
+    def test_failed_connect_saves_nothing(self):
+        app = self.app()
+        self.settle(app)
+        app.remember.set(True)
+        self.connect_error = nm.VPNError("Error: activation failed")
+        app.password.insert(0, PASSWORD)
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+
+    def test_unticked_saves_nothing(self):
+        app = self.app()
+        self.settle(app)
+        app.password.insert(0, PASSWORD)
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+
+    def test_saved_password_one_click(self):  # FR-SAVE-03, BR-SAVE-01
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app()
+        self.settle(app)
+        self.assertTrue(app.using_saved)
+        self.assertIsNone(app.password)  # saved password never put in a widget
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.calls[0], ("connect", PASSWORD))
+        self.assertNotIn(PASSWORD, self.log_text(app))
+
+    def test_saved_password_plus_fresh_code(self):
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app(otp=True)
+        self.settle(app)
+        app.on_connect()  # no code typed
+        self.assertEqual(self.calls, [])
+        app.otp.insert(0, CODE)
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.calls[0], ("connect", PASSWORD + CODE))
+
+    def test_rejected_saved_password_is_forgotten(self):  # FR-SAVE-05
+        self.kr.data[("Company VPN", "alex")] = "old-password"
+        app = self.app()
+        self.settle(app)
+        self.connect_error = nm.VPNError("Error: Connection activation failed: login failed")
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+        self.assertEqual(app.error, ui_model.ERRORS["saved_auth"])
+        self.assertFalse(app.using_saved)
+        self.assertIsNotNone(app.password)  # fields are back
+
+    def test_wrong_code_keeps_saved_password(self):  # audit 1
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app(otp=True)
+        self.settle(app)
+        self.connect_error = nm.VPNError("Authentication failed - check your username, password (and OTP).")
+        app.otp.insert(0, "000000")
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {("Company VPN", "alex"): PASSWORD})
+        self.assertEqual(app.error, ui_model.ERRORS["auth"])
+        self.assertTrue(app.using_saved)
+
+    def test_network_failure_keeps_saved_password(self):  # FR-SAVE-05 "other failures keep it"
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app()
+        self.settle(app)
+        self.connect_error = nm.VPNError("Timed out waiting for NetworkManager.")
+        app.on_connect()
+        self.settle(app)
+        self.assertIn(("Company VPN", "alex"), self.kr.data)
+        self.assertTrue(app.using_saved)
+
+    def test_change_user_forgets(self):
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app()
+        self.settle(app)
+        app.on_forget()  # "Change user" and "Forget" share the handler
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+        self.assertIsNotNone(app.username)
+
+    def test_menu_has_forget_item(self):
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app()
+        self.settle(app)
+        labels = [app.more_menu.entrycget(i, "label") for i in range(app.more_menu.index("end") + 1)
+                  if app.more_menu.type(i) == "command"]
+        self.assertIn("Forget saved password", labels)
+
+    def test_remove_vpn_file_forgets(self):
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app()
+        self.settle(app)
+        with mock.patch.object(gui.messagebox, "askyesno", return_value=True), \
+             mock.patch.object(nm, "delete"):
+            app.on_remove()
+            self.settle(app)
+        self.assertEqual(self.kr.data, {})
+
+    def test_other_user_saved_password_dropped(self):  # audit 8
+        self.kr.data[("Company VPN", "bob")] = "bobs"
+        app = self.app()  # profile user is alex, so no saved layout
+        self.settle(app)
+        self.assertFalse(app.using_saved)
+        app.password.insert(0, PASSWORD)
+        app.on_connect()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+
+    def test_tray_error_shown_on_open(self):  # FR-SAVE-07
+        a = gui.App(self.root, settings.Settings(), from_tray=True, initial_error="saved_auth")
+        _KEEP.append(a)
+        self.pump(lambda: a.loaded and not a.busy)
+        self.assertEqual(a.error, ui_model.ERRORS["saved_auth"])
+
+    def test_forget(self):  # FR-SAVE-06
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app()
+        self.settle(app)
+        app.on_forget()
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+        self.assertFalse(app.using_saved)
+
+    def test_policy_off_deletes_and_hides(self):  # FR-SAVE-08
+        self.kr.data[("Company VPN", "alex")] = PASSWORD
+        app = self.app(allow_save_password=False)
+        self.settle(app)
+        self.assertEqual(self.kr.data, {})
+        self.assertIsNone(app.remember)
+        self.assertFalse(app.using_saved)
+
+    def test_no_keyring_hides_checkbox(self):  # FR-SAVE-02
+        self.kr.ok = False
+        app = self.app()
+        self.settle(app)
+        self.assertIsNone(app.remember)

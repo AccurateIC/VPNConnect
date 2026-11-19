@@ -23,6 +23,7 @@ class Settings:
     session_limit_minutes: int = 0
     otp: bool = False
     disconnect_on_exit: bool = True
+    allow_save_password: bool = True  # CR-2 / FR-SAVE-08
 
 
 def _str2bool(value: str) -> bool:
@@ -57,3 +58,7 @@ def _apply(s: Settings, section) -> None:
         s.otp = _str2bool(section["otp"])
     if "disconnect_on_exit" in section:
         s.disconnect_on_exit = _str2bool(section["disconnect_on_exit"])
+    if "allow_save_password" in section:
+        # Can only be turned OFF by a later file: an employee's ~/.config cannot
+        # re-enable saved passwords that IT disabled in /etc (CR-2 amendment 1).
+        s.allow_save_password = s.allow_save_password and _str2bool(section["allow_save_password"])

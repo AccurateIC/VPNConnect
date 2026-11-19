@@ -5,8 +5,10 @@ Clicking the icon opens a small menu; "Open VPNConnect" (or a middle-click)
 shows the window, which runs as a separate child process (Tk and GTK do not
 share a process here).
 
-Threading (BR-TRAY-02): NetworkManager calls run in worker threads; results
-reach GTK through GLib.idle_add. The tray never touches a password (BR-TRAY-01).
+Threading (BR-TRAY-02): NetworkManager and keyring calls run in worker threads;
+results reach GTK through GLib.idle_add. The tray never asks for a password; its
+one-click Connect (FR-SAVE-07) reads the user's opted-in saved password from the
+keyring inside the worker and hands it to NetworkManager on stdin (BR-SAVE-01).
 
 Signals: SIGUSR1 means "open the window". Its default action kills a process,
 so both the tray and the window child neutralise it before anyone can learn
@@ -25,7 +27,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import nm, settings
+from . import keyring_store, nm, settings, ui_model
 
 POLL_SECONDS = 3  # FR-TRAY-02
 HOST_WAIT_SECONDS = 20  # autostart may run before GNOME has loaded the extension
@@ -86,7 +88,7 @@ def running_pid(path: Path) -> int | None:
     return pid
 
 
-def window_command() -> list[str]:
+def window_command(error: str | None = None) -> list[str]:
     """The window as a child process, from the same install as this tray (FR-TRAY-04).
 
     SIGUSR1 is ignored first thing, so an Open that arrives while the window is
@@ -98,7 +100,10 @@ def window_command() -> list[str]:
         f"import sys; sys.path.insert(0, {root!r}); "
         "from vpnconnect.cli import main; sys.exit(main())"
     )
-    return [sys.executable, "-I", "-c", boot, "gui", "--from-tray"]
+    cmd = [sys.executable, "-I", "-c", boot, "gui", "--from-tray"]
+    if error in ui_model.ERRORS:  # only a known category name, never raw error text
+        cmd += ["--error", error]
+    return cmd
 
 
 def load_indicator():
@@ -164,15 +169,19 @@ class Tray:
         self.status_item.set_sensitive(False)
         self.open_item = Gtk.MenuItem(label="Open VPNConnect")
         self.open_item.connect("activate", lambda _w: self.open_window())
+        self.connect_item = Gtk.MenuItem(label="Connect")
+        self.connect_item.connect("activate", lambda _w: self.connect())
         self.disconnect_item = Gtk.MenuItem(label="Disconnect")
         self.disconnect_item.connect("activate", lambda _w: self.disconnect())
         quit_item = Gtk.MenuItem(label="Quit VPNConnect")
         quit_item.connect("activate", lambda _w: self.quit())
-        for item in (self.status_item, self.open_item, self.disconnect_item,
+        for item in (self.status_item, self.open_item, self.connect_item, self.disconnect_item,
                      Gtk.SeparatorMenuItem(), quit_item):
             menu.append(item)
         menu.show_all()
         self.disconnect_item.set_visible(False)
+        self.connect_item.set_visible(False)
+        self.connecting = False
         self.indicator.set_menu(menu)
         self.indicator.set_secondary_activate_target(self.open_item)  # middle-click = Open
 
@@ -200,16 +209,28 @@ class Tray:
             st = nm.status(self.cfg.connection_name)
         except Exception:  # NetworkManager hiccup: keep the last known state
             st = None
-        self.GLib.idle_add(self._apply, st)
+        can_connect = st is not None and self._one_click_possible(st)
+        self.GLib.idle_add(self._apply, st, can_connect)
 
-    def _apply(self, st):
+    def _one_click_possible(self, st: nm.Status) -> bool:
+        """FR-SAVE-07 (worker side): profile, not active, no OTP, allowed, password saved."""
+        if not st.exists or is_active(st) or self.cfg.otp or not self.cfg.allow_save_password:
+            return False
+        # Existence only: never load the secret just to show a menu item (BR-SAVE-01),
+        # and never trigger a keyring unlock prompt from a 3 s poll.
+        return keyring_store.has_saved(self.cfg.connection_name, st.username)
+
+    def _apply(self, st, can_connect=False):
         self.polling = False
         if st is not None:
             self.status = st
             icon, line, show_disconnect = view(st)
+            if self.connecting and not is_active(st):
+                icon, line = ICON_CONNECTING, "Connecting..."
             self.indicator.set_icon_full(icon, line)
             self.status_item.set_label(line)
             self.disconnect_item.set_visible(show_disconnect)
+            self.connect_item.set_visible(can_connect and not self.connecting)
         return False  # run once
 
     # actions
@@ -221,6 +242,55 @@ class Tray:
             self.child.send_signal(signal.SIGUSR1)
         else:
             self.child = subprocess.Popen(window_command())
+
+    def connect(self):
+        """FR-SAVE-07: one-click connect with the saved password. Failure opens the window."""
+        if self.connecting or self.quitting:
+            return
+        self.connecting = True
+        self.connect_item.set_visible(False)
+        self.indicator.set_icon_full(ICON_CONNECTING, "Connecting...")
+        self.status_item.set_label("Connecting...")
+        conn, username = self.cfg.connection_name, self.status.username
+
+        def job():
+            ok, error = False, "generic"
+            try:
+                if self.quitting:
+                    return
+                password = keyring_store.lookup(conn, username)
+                if not password:
+                    error = "saved_auth"  # gone or unreadable: the window asks for it
+                else:
+                    nm.connect(conn, password)
+                    ok = True
+                    if self.quitting and self.cfg.disconnect_on_exit:
+                        nm.disconnect(conn)  # Quit was chosen while we were connecting
+            except nm.VPNError as exc:
+                error = ui_model.classify_error(str(exc))
+                if error == "auth":  # no OTP on this path, so it really is the password
+                    keyring_store.forget(conn)  # FR-SAVE-05
+                    error = "saved_auth"
+            except Exception:
+                pass
+            finally:
+                self.GLib.idle_add(self._connect_done, ok, error)
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def _connect_done(self, ok: bool, error: str = "generic"):
+        self.connecting = False
+        if not ok and not self.quitting:
+            # Show why in a fresh window (an open one may still show "Password: saved").
+            if self.child is not None and self.child.poll() is None:
+                self.child.terminate()
+                try:
+                    self.child.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.child.kill()
+            self.child = subprocess.Popen(window_command(error))
+        self._poll()
+        return False
 
     def disconnect(self):
         def job():

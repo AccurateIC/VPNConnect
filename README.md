@@ -18,7 +18,7 @@ Works on Ubuntu, Debian and Fedora (GNOME desktop).
 Open a terminal (`Ctrl` + `Alt` + `T`), paste this line, press Enter and type your computer password:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/main/get.sh | sudo bash
+curl -fsSL https://github.com/AccurateIC/VPNConnect/archive/main.tar.gz | tar -xz -C /tmp && sudo /tmp/VPNConnect-main/install.sh
 ```
 
 That's it. Then open **VPNConnect** from your applications menu (or log out and back in) and the
@@ -27,7 +27,16 @@ VPN icon appears in the top bar. From now on it starts by itself every time you 
 > No `curl`? Run `sudo apt install curl` first (Fedora: `sudo dnf install curl`).
 
 <details>
-<summary>Install from a downloaded copy instead</summary>
+<summary>Other ways to install</summary>
+
+Shorter command (needs `raw.githubusercontent.com`, which some office networks block; if you see
+`Connection reset by peer`, use the command above):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/main/get.sh | sudo bash
+```
+
+From a downloaded copy:
 
 ```bash
 git clone https://github.com/AccurateIC/VPNConnect.git
@@ -87,6 +96,7 @@ If IT set a time limit, you are disconnected automatically after that time.
 | "Wrong username or password" | Check them and try again. If you use a code, wait for a new one. |
 | "Something went wrong" | Try again. Still failing? In the window click **Show details**, then **Copy for IT**, and paste it into a message to IT. |
 | No VPN icon in the top bar | Open **VPNConnect** from the applications menu (this starts the icon). On Fedora or Debian, IT may need to turn on top-bar icons, see below. |
+| Install says `Connection reset by peer` | Your network blocks `raw.githubusercontent.com`. Use the install command at the top of this page; it only needs `github.com`. |
 | "VPNConnect can't start" window | Something is missing on this computer. Run the install command again, or ask IT. |
 | Connected, but internal sites don't open | Disconnect and connect again. If that doesn't help, use **Copy for IT**. |
 | Got a new VPN file from the portal | Window: **More** > **Change VPN file...** and pick the new file. It replaces the old one. |
@@ -113,10 +123,22 @@ vpnconnect tray                              # the top-bar icon (starts by itsel
 
 | Task | Command |
 |---|---|
-| Install or update | `curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/main/get.sh \| sudo bash` |
-| Install with a shared VPN file for everyone | `curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/main/get.sh \| sudo bash -s -- --profile /path/to/company.ovpn` |
-| Uninstall | `curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/main/get.sh \| sudo bash -s -- --uninstall` |
-| Install a specific branch or tag | `curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/<ref>/get.sh \| sudo VPNCONNECT_REF=<ref> bash` |
+First download the app (works on networks that block `raw.githubusercontent.com`):
+
+```bash
+curl -fsSL https://github.com/AccurateIC/VPNConnect/archive/main.tar.gz | tar -xz -C /tmp
+```
+
+| Task | Command |
+|---|---|
+| Install or update | `sudo /tmp/VPNConnect-main/install.sh` |
+| Install with a shared VPN file for everyone | `sudo /tmp/VPNConnect-main/install.sh --profile /path/to/company.ovpn` |
+| Uninstall | `sudo /tmp/VPNConnect-main/uninstall.sh` |
+| Install a specific branch or tag | download `archive/<ref>.tar.gz` instead; the folder is `/tmp/VPNConnect-<ref>` |
+
+If your network allows `raw.githubusercontent.com`, the `get.sh` one-liner does the download for you:
+`curl -fsSL https://raw.githubusercontent.com/AccurateIC/VPNConnect/main/get.sh | sudo bash`
+(add `-s -- --profile <file>` or `-s -- --uninstall` after `bash`).
 
 Running the install again updates the app and keeps your settings. From a clone, `sudo ./install.sh`
 and `sudo ./uninstall.sh` do the same.

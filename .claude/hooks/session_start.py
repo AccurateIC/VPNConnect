@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""SessionStart hook: print a compact claude-company state digest.
+
+If company/state/RESUME.md exists, emit a plain-text digest (<= 60 lines):
+the first 40 lines of RESUME.md and a digest PAIR (identity line + execution
+line) per task entry in flight, display truncated at three entries plus one
+overflow line. STATUS.md is retired (FR-ASR-19); session_start ignores it.
+
+With exactly ONE entry the two lines are what they have always been (BR-MST-02
+identity). `dispatches` is that entry's PER-SLUG count; `self-authored` is the
+GLOBAL count, a property of the tree rather than of an entry.
+
+One further line, added when DECISIONS #20 deleted the Stop-time gate: a
+    `gates:` advisory when the stamp cannot support a merge onto main and
+    gating work is in flight. Same fact the deleted hook blocked on, said
+    once to the session that can act on it instead of shouted at a session
+    trying to finish.
+
+ALWAYS exits 0, and has no block path. Nothing here may grow one.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _common as c  # noqa: E402
+import dispatch_feed as gp  # noqa: E402  # FR-ASR-03
+
+MAX_LINES = 60
+
+# Display truncation ONLY, and never a decision: this hook prints and exits 0.
+DIGEST_CAP = 3
+
+EXEC_LINE = (
+    "execution: {} | dispatches: {} | self-authored: {} files | team: {}"
+)
+
+
+def gate_alert(root, tasks):
+    """One advisory line, or None. NEVER a decision.
+
+    Armed when the tree has a gating entry (anything not quick/hotfix) AND
+    check_stamp says the stamp cannot support a merge onto main - missing,
+    red, stale, malformed, or hand-edited. Commit is allowed on a red tree
+    (DECISIONS #25); merge onto main/master is not. That is the exact
+    condition the deleted Stop-time gate blocked on, now said to the
+    session that can run the ladder, and worth nothing refusing the turn of
+    a session that cannot.
+
+    Rendered near the top of the digest deliberately. RESUME.md can fill
+    MAX_LINES, and a warning that scrolls off the end was not delivered.
+
+    Fails silent: any trouble computing the stamp returns None rather than
+    losing the whole digest, since this line is advisory and the digest is not.
+    """
+    gating = [e for e in tasks if e.get("type") not in ("quick", "hotfix")]
+    if not gating:
+        return None
+    try:
+        ok, reason = c.check_stamp(root)
+    except Exception:
+        return None
+    if ok:
+        return None
+    # Name every gating entry: this line is the only place a session learns
+    # its own slug is implicated, so the default cap of 3 would hide one.
+    return (
+        "gates: {} - in flight: {}. Commit is allowed; merge onto main "
+        "is not until green.".format(
+            reason, c.slug_list(gating, cap=max(len(gating), 1)))
+    )
+
+
+def head_lines(path, n):
+    try:
+        with open(path) as f:
+            out = []
+            for _ in range(n):
+                line = f.readline()
+                if not line:
+                    break
+                out.append(line.rstrip("\n"))
+            return out
+    except Exception:
+        return []
+
+
+def single_digest(root, tasks, out):
+    """N == 1: the two lines shipped before multi-session tasks, unchanged."""
+    task = tasks[0]
+    out.append(
+        "active-task: {} ({}) brief={}".format(
+            task.get("task"), task.get("type"), task.get("brief")
+        )
+    )
+    ledger = gp.read_ledger(root)
+    out.append(
+        EXEC_LINE.format(
+            gp.execution_decision(task) or "undecided",
+            len(gp.dispatches_for(ledger, gp.ledger_key(task))),
+            len(ledger["self_authored"]),  # global, not per-slug
+            ", ".join(gp.roster(root)),
+        )
+    )
+
+
+def multi_digest(root, tasks, out):
+    """N > 1: one digest PAIR per entry (capped), then one overflow line."""
+    ledger = gp.read_ledger(root)
+    team = ", ".join(gp.roster(root))
+    selfn = len(ledger["self_authored"])  # global, not per-slug
+    shown = tasks[:DIGEST_CAP]
+    for entry in shown:
+        line = "active-task: {} ({}) brief={}".format(
+            entry.get("task"), entry.get("type"), entry.get("brief")
+        )
+        # The emergency marker names its own slug: at N > 1 the reader cannot
+        # tell which entry is the hotfix otherwise.
+        if entry.get("type") == "hotfix":
+            line += " HOTFIX:{}".format(entry.get("task") or "<task-slug>")
+        out.append(line)
+        out.append(
+            EXEC_LINE.format(
+                gp.execution_decision(entry) or "undecided",
+                len(gp.dispatches_for(ledger, gp.ledger_key(entry))),
+                selfn,
+                team,
+            )
+        )
+    hidden = len(tasks) - len(shown)
+    if hidden > 0:
+        out.append("and {} more".format(hidden))
+
+
+def main():
+    payload = c.read_stdin_json() or {}
+    try:
+        root = c.project_root(payload)
+        state = os.path.join(root, "company", "state")
+        resume = os.path.join(state, "RESUME.md")
+        # FR-ASR-19 / OQ-ASR-10 assumption: STATUS.md is retired; ignore it.
+        if not os.path.exists(resume):
+            sys.exit(0)
+
+        out = ["claude-company state digest"]
+        tasks = c.active_tasks(root)
+        alert = gate_alert(root, tasks)
+        if alert:
+            out.append(alert)
+        out.append("-- RESUME.md --")
+        out.extend(head_lines(resume, 40))
+        # BR-MST-02: the single-entry path is the shipped path, untouched.
+        if len(tasks) == 1:
+            single_digest(root, tasks, out)
+        elif tasks:
+            multi_digest(root, tasks, out)
+        # MAX_LINES is deliberately unchanged: no reservation, no raise. A
+        # saturated RESUME/STATUS hiding the digest is a known worry, not this
+        # band's fix.
+        print("\n".join(out[:MAX_LINES]))
+    except Exception:
+        pass
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,121 @@
+import subprocess
+import unittest
+from unittest import mock
+
+from vpnconnect import cli, nm, settings
+
+
+def proc(rc=0, out="", err=""):
+    return subprocess.CompletedProcess([], rc, out, err)
+
+
+class StatusTests(unittest.TestCase):
+    def test_connected_with_username(self):
+        out = "GENERAL.STATE:activated\nvpn.data:remote = 1.2.3.4:443, username = alice, password-flags = 2\n"
+        with mock.patch.object(nm, "_run", return_value=proc(out=out)):
+            st = nm.status("X")
+        self.assertTrue(st.connected)
+        self.assertEqual(st.username, "alice")
+
+    def test_inactive_profile(self):
+        with mock.patch.object(nm, "_run", return_value=proc(out="vpn.data:username = bob\n")):
+            st = nm.status("X")
+        self.assertEqual((st.exists, st.state, st.username), (True, "disconnected", "bob"))
+
+    def test_missing(self):
+        with mock.patch.object(nm, "_run", return_value=proc(rc=10, err="no such connection")):
+            self.assertEqual(nm.status("X").state, "missing")
+
+
+class ConnectTests(unittest.TestCase):
+    def test_password_goes_to_stdin_not_argv(self):
+        with mock.patch.object(nm, "_run", return_value=proc()) as run:
+            nm.connect("Company VPN", "s3cr:et")
+        args, kwargs = run.call_args
+        self.assertNotIn("s3cr:et", " ".join(args[0]))
+        self.assertEqual(kwargs["input"], "vpn.secrets.password:s3cr:et\n")
+        self.assertIn("/dev/stdin", args[0])
+
+    def test_auth_failure_is_friendly(self):
+        with mock.patch.object(nm, "_run", return_value=proc(rc=4, err="activation failed")), \
+             mock.patch.object(nm, "recent_openvpn_log", return_value="AUTH: Received control message: AUTH_FAILED"):
+            with self.assertRaisesRegex(nm.VPNError, "Authentication failed"):
+                nm.connect("X", "pw")
+
+    def test_newline_rejected(self):
+        with self.assertRaises(nm.VPNError):
+            nm.connect("X", "a\nb")
+
+
+class OvpnCompatTests(unittest.TestCase):
+    """Sophos Firewall .ovpn files carry a route line NetworkManager's importer rejects."""
+
+    SOPHOS = ("client\ndev tun\nproto udp\nroute remote_host 255.255.255.255 net_gateway\n"
+              "nobind\n<key>\nSECRET\n</key>\nremote vpn.invalid 8443 udp\n")
+
+    def test_drops_only_the_unsupported_line_privately(self):
+        import os, stat, tempfile, pathlib
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
+            src = pathlib.Path(d, "me.ovpn")
+            src.write_text(self.SOPHOS)
+            copy = nm.compatible_copy(src)
+            self.assertEqual(copy.name, "me.ovpn")
+            self.assertEqual(stat.S_IMODE(copy.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(copy.parent.stat().st_mode), 0o700)
+            text = copy.read_text()
+            self.assertNotIn("remote_host", text)
+            self.assertEqual(text, self.SOPHOS.replace("route remote_host 255.255.255.255 net_gateway\n", ""))
+            self.assertEqual(src.read_text(), self.SOPHOS)  # original untouched
+            copy.unlink(); copy.parent.rmdir()
+
+    def test_untouched_files_need_no_copy(self):
+        import tempfile, pathlib
+        with tempfile.TemporaryDirectory() as d:
+            src = pathlib.Path(d, "plain.ovpn")
+            src.write_text("client\nroute 10.0.0.0 255.0.0.0\nremote vpn.invalid 1194\n")
+            self.assertIsNone(nm.compatible_copy(src))
+
+
+class SettingsTests(unittest.TestCase):
+    def test_user_overrides_system(self):
+        import tempfile, pathlib
+        with tempfile.TemporaryDirectory() as d:
+            sys_cfg, user_cfg = pathlib.Path(d, "a.conf"), pathlib.Path(d, "b.conf")
+            sys_cfg.write_text("[vpnconnect]\nconnection_name = Acme VPN\nsession_limit_minutes = 30\notp = yes\n")
+            user_cfg.write_text("[vpnconnect]\nsession_limit_minutes = bogus\ndisconnect_on_exit = no\n")
+            s = settings.load([sys_cfg, user_cfg])
+        self.assertEqual(s.connection_name, "Acme VPN")
+        self.assertEqual(s.session_limit_minutes, 30)  # invalid user value ignored
+        self.assertTrue(s.otp)
+        self.assertFalse(s.disconnect_on_exit)
+
+
+class CliTests(unittest.TestCase):
+    def setUp(self):
+        # Hermetic: never read the developer's real /etc or ~/.config settings.
+        empty = settings.SYSTEM_DIR / "__vpnconnect_test_does_not_exist__.conf"
+        for name in ("SYSTEM_CONFIG", "USER_CONFIG"):
+            patcher = mock.patch.object(settings, name, empty)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch("sys.stdout")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_status_exit_codes(self):
+        with mock.patch.object(nm, "check_requirements", return_value=[]), \
+             mock.patch.object(nm, "status", return_value=nm.Status(True, "connected", "alice")):
+            self.assertEqual(cli.main(["status"]), 0)
+        with mock.patch.object(nm, "check_requirements", return_value=[]), \
+             mock.patch.object(nm, "status", return_value=nm.Status(True, "disconnected")):
+            self.assertEqual(cli.main(["status"]), 3)
+
+    def test_missing_requirements(self):
+        with mock.patch.object(nm, "check_requirements", return_value=["no plugin"]), \
+             mock.patch("sys.stderr"):
+            self.assertEqual(cli.main(["status"]), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

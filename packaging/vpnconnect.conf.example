@@ -1,0 +1,23 @@
+# VPNConnect organisation settings -> /etc/vpnconnect/vpnconnect.conf
+# Users may override any value in ~/.config/vpnconnect/vpnconnect.conf
+[vpnconnect]
+
+# Name shown in the app and in the GNOME network menu.
+connection_name = Company VPN
+
+# Where employees download their personal .ovpn profile (Sophos user portal).
+# Leave empty to hide the "Get profile" button. Do NOT commit the real URL to a public repo.
+portal_url =
+
+# Disconnect automatically after this many minutes (0 = never). GUI only.
+session_limit_minutes = 0
+
+# Show an OTP field; the code is appended to the password (Sophos convention).
+otp = false
+
+# Disconnect when the window is closed.
+disconnect_on_exit = true
+
+# Let employees tick "Remember my password on this computer". The password is kept only in
+# their own encrypted keyring. Set to false to forbid saved passwords (existing ones are deleted).
+allow_save_password = true

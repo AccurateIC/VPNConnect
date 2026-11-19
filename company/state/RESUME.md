@@ -20,6 +20,9 @@
 - Verified live on the owner's Ubuntu 24.04: the icon is registered and visible (company/evidence/tray). Gates green, 46 tests.
 - The tray audit returned HALT (two startup signal races, a stale-status Quit, a queue put inside a signal handler, logout policy, no icon host, installer). All fixed in a follow-up commit, with regression tests (53 tests). The auditor's own race scripts now pass: 3/3 tray runs survive, and a double Open leaves one window. Live menu evidence: the owner clicked through the icon menu on 2026-11-19 ("it works").
 
+- 2026-11-19: the owner ran the github.com-archive install of the branch on their Ubuntu 24.04 machine. It installed, and the icon works (live end-to-end). The office/home network blocks raw.githubusercontent.com, so the README leads with the archive command.
+- Open: PR #2 (includes #1). After the merge, close #1 and re-test the `main` archive command on a second machine.
+
 ## Next
 - `/company` is open. Candidate work, cheapest first: add tests for import_profile and `_ensure_profile` (WORRIES #2), and add a CI workflow that runs the two gates.
 

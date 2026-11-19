@@ -1,7 +1,32 @@
 {
   "$comment": "Frozen-surface registry. always[] is the unrecoverable baseline (env, evidence record, witnesses) and is hard-BLOCKed by guard_frozen.py. Lockfiles are NOT in always[] - they WARN mid-flight (FR-ASR-08). Project surfaces[] are NOT blocked mid-flight; guard_commit blocks an UNDECLARED change to a matching path at commit (FR-ASR-05). Populate 'surfaces' for YOUR project during /company-init or /onboard. Changes to frozen surfaces go through company/change-requests/.",
   "version": 1,
-  "surfaces": [],
+  "surfaces": [
+    {
+      "pattern": "vpnconnect/settings.py",
+      "reason": "Config schema: keys/precedence read from /etc/vpnconnect/vpnconnect.conf already deployed on employee machines"
+    },
+    {
+      "pattern": "packaging/vpnconnect.conf.example",
+      "reason": "Shipped config template copied to /etc by install.sh"
+    },
+    {
+      "pattern": "install.sh",
+      "reason": "Install layout (/opt/vpnconnect, /usr/local/bin/vpnconnect, /etc/vpnconnect) that IT runs on every machine"
+    },
+    {
+      "pattern": "uninstall.sh",
+      "reason": "Must mirror install.sh layout"
+    },
+    {
+      "pattern": "packaging/vpnconnect.desktop",
+      "reason": "Menu entry installed system-wide"
+    },
+    {
+      "pattern": ".gitignore",
+      "reason": "Secret blocklist (*.ovpn, keys, credentials, vpnconnect.conf) - weakening it can leak gateway details"
+    }
+  ],
   "always": [
     ".env",
     ".env.*",

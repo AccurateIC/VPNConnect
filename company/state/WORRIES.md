@@ -1,1 +1,11 @@
 # WORRIES - maintained by the company. Open risks and unknowns, worst first.
+
+1. ~~**CLI tests are not hermetic.**~~ FIXED 2026-11-19 (easy-gui). `CliTests` calls `cli.main()`, which runs `settings.load()` against the real `/etc/vpnconnect` and `~/.config/vpnconnect`. They pass today because `nm.status` is mocked, but the dev machine's config leaks in (the gate output shows "Company VPN: ..."). Fix: point `VPNCONNECT_SYSTEM_DIR`/`XDG_CONFIG_HOME` at a tmpdir in the tests.
+2. **Coverage gaps on the riskiest paths.** No tests for `import_profile` (libnm, user permission, password-flags=2), `delete`/`disconnect` error handling, `_ensure_profile` auto-import, or anything in `gui.py` (session-limit timer, on_close disconnect). The security invariants are pinned only on the connect path.
+3. ~~**`on_close` calls `nm.disconnect` on the Tk main thread.**~~ FIXED 2026-11-19 (FR-GUI-09). It can freeze the window for up to 30s if NetworkManager hangs. Low impact, but it breaks the threading rule.
+4. **The password crosses `nmcli` stdin as plaintext.** That is the intended design, and it is fine. Any future logging of `_run` inputs would leak it, so never log `input=`.
+5. **No CI.** The gates run only locally through the company hooks.
+6. **`settings.load([])` falls back to the default paths** (`paths or [...]`), not to defaults only. This is a footgun for tests. `settings.py` is frozen, so changing it needs a CR.
+7. **A wrong password may show "Something went wrong."** `nm.connect` only spots AUTH_FAILED in the journal, and most employees can't read the journal (not in adm/systemd-journal). Then a wrong password shows the generic message. Fix candidate: parse nmcli's own failure reason in nm.py.
+8. **The connected timer starts when the app sees the connection,** not when NetworkManager made it. Opening the app on a connection that is already up restarts the timer and the session-limit clock.
+9. **GUI tests need a display.** On a headless CI they skip, so the threading and close paths go unchecked. Use xvfb-run in any future CI.

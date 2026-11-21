@@ -1,0 +1,17 @@
+{
+  "$comment": "Frozen-surface registry. always[] is the unrecoverable baseline (env, evidence record, witnesses) and is hard-BLOCKed by guard_frozen.py. Lockfiles are NOT in always[] - they WARN mid-flight (FR-ASR-08). Project surfaces[] are NOT blocked mid-flight; guard_commit blocks an UNDECLARED change to a matching path at commit (FR-ASR-05). Populate 'surfaces' for YOUR project during /company-init or /onboard. Changes to frozen surfaces go through company/change-requests/.",
+  "version": 1,
+  "surfaces": [],
+  "always": [
+    ".env",
+    ".env.*",
+    "company/witnesses.json",
+    "company/state/gates.status",
+    "company/state/adherence.log",
+    "company/state/provenance-ledger.json",
+    "company/state/install-manifest.json",
+    "company/state/.update-backups/**",
+    "company/state/gates.log",
+    "company/state/gate-output/**"
+  ]
+}
